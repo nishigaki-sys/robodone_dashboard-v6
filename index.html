@@ -1154,12 +1154,12 @@
         };
 
        // ==========================================
-        // 4. School Console Component (修正版: CSV一括取込機能追加)
+        // 4. School Console Component (完全版: CSV一括取込機能 & 日付補正対応)
         // ==========================================
         function SchoolConsole({ onBack, campus, allData, selectedYear, setSelectedYear, refreshData, showNotify, isAdmin }) {
             const [activeTab, setActiveTab] = useState('daily');
-            const [planMode, setPlanMode] = useState('annual');
-            const [reportMode, setReportMode] = useState('monthly');
+            const [planMode, setPlanMode] = useState('annual'); // 'annual' | 'monthly'
+            const [reportMode, setReportMode] = useState('monthly'); // 'monthly' | 'annual'
             const [selectedMonth, setSelectedMonth] = useState(() => { const d = new Date(); return (d.getMonth() + 1) + '月'; });
             const [reportDate, setReportDate] = useState(formatDateStr(new Date()));
             const [inputData, setInputData] = useState({ weather: 'sunny', flyers: 0, touch: 0, trial: 0, comment: '' });
@@ -1169,7 +1169,7 @@
             const [uploadTargetYear, setUploadTargetYear] = useState(selectedYear);
             const [isInputModalOpen, setIsInputModalOpen] = useState(false);
 
-            // --- 追加: CSVインポート用コンポーネント (日付補正機能付き) ---
+            // --- 追加: CSVインポート用コンポーネント ---
             const CSVImportPanel = () => {
                 const dailyFileRef = useRef(null);
                 const planFileRef = useRef(null);
@@ -1193,7 +1193,7 @@
                     reader.readAsText(file, 'Shift_JIS');
                 };
 
-                // 日報インポート処理 (修正版: 日付フォーマット正規化対応)
+                // 日報インポート処理 (日付処理強化版)
                 const handleDailyImport = async (e) => {
                     const file = e.target.files[0];
                     if (!file) return;
@@ -1206,36 +1206,35 @@
                             let count = 0;
                             let totalCount = 0;
 
-                            // 1行目はヘッダーとしてスキップ (i=1から開始)
                             for (let i = 1; i < lines.length; i++) {
-                                const cols = lines[i].split(',').map(c => c.trim());
-                                // 日付(cols[0])がない行はスキップ
+                                // カンマで分割し、前後の空白とダブルクォートを除去
+                                const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+                                
+                                // 日付がない行はスキップ
                                 if (!cols[0]) continue;
                                 
-                                // --- 日付の正規化処理 ---
-                                // 2025/11/1 などの形式を 2025-11-01 に変換
-                                const dObj = new Date(cols[0]);
-                                if (isNaN(dObj.getTime())) {
-                                    console.warn(`無効な日付形式のためスキップ:行${i+1} [${cols[0]}]`);
-                                    continue; 
+                                // --- 【修正】日付文字列を直接解析して YYYY-MM-DD を作る ---
+                                // "2025/11/1" や "2025-11-01" を想定
+                                const dateParts = cols[0].split(/[\/\-]/); // スラッシュかハイフンで分割
+                                if (dateParts.length !== 3) {
+                                    console.warn(`日付形式エラー行: ${i+1} [${cols[0]}]`);
+                                    continue;
                                 }
-                                
-                                const y = dObj.getFullYear();
-                                const m = ('0' + (dObj.getMonth() + 1)).slice(-2); // ゼロ埋め
-                                const d = ('0' + dObj.getDate()).slice(-2);       // ゼロ埋め
+
+                                const y = dateParts[0];
+                                const m = ('0' + dateParts[1]).slice(-2); // ゼロ埋め
+                                const d = ('0' + dateParts[2]).slice(-2); // ゼロ埋め
                                 const dateStr = `${y}-${m}-${d}`;
-                                // ------------------------
+                                // -------------------------------------------------------
 
                                 const weatherMap = { '晴': 'sunny', '曇': 'cloudy', '雨': 'rainy', '雪': 'snowy', '休': 'closed' };
                                 const weather = weatherMap[cols[1]] || 'sunny';
                                 
-                                // 数値変換 (空欄は0とする)
                                 const flyers = cols[2] === '' ? 0 : Number(cols[2]);
                                 const touchTry = cols[3] === '' ? 0 : Number(cols[3]);
                                 const trialLessons = cols[4] === '' ? 0 : Number(cols[4]);
                                 const comment = cols[5] || '';
 
-                                // DB登録用の参照作成
                                 const docRef = doc(db, "daily_reports", `${campus.id}_${dateStr}`);
                                 batch.set(docRef, {
                                     campusId: campus.id,
@@ -1251,20 +1250,18 @@
                                 count++;
                                 totalCount++;
 
-                                // バッチ書き込み制限(500件)への対応
                                 if (count >= batchLimit) {
                                     await batch.commit();
                                     batch = writeBatch(db);
                                     count = 0;
                                 }
                             }
-                            // 残りのデータを書き込み
                             if (count > 0) await batch.commit();
                             
                             showNotify(`${totalCount}件の日報データを取り込みました`);
-                            refreshData(); // 画面を再描画
+                            refreshData();
                         } catch (err) {
-                            console.error(err);
+                            console.error("Import Error Details:", err);
                             showNotify("取込エラー: " + err.message, "error");
                         } finally {
                             setIsProcessing(false);
@@ -1273,7 +1270,7 @@
                     });
                 };
 
-                // 計画インポート処理 (変更なし)
+                // 計画インポート処理
                 const handlePlanImport = async (e) => {
                     const file = e.target.files[0];
                     if (!file) return;
@@ -1406,66 +1403,7 @@
                 );
             };
 
-                return (
-                    <div className="space-y-8 animate-in fade-in">
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                            <h3 className="font-bold text-gray-800 mb-6 flex items-center">
-                                <Upload className="w-5 h-5 mr-2 text-brand-blue"/> データ一括取込
-                            </h3>
-
-                            <div className="flex gap-4 mb-6">
-                                <button onClick={()=>setImportType('daily')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${importType==='daily' ? 'bg-brand-blue text-white shadow' : 'bg-gray-100 text-gray-500'}`}>日報データ</button>
-                                <button onClick={()=>setImportType('plan')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${importType==='plan' ? 'bg-brand-blue text-white shadow' : 'bg-gray-100 text-gray-500'}`}>週次計画データ</button>
-                            </div>
-
-                            {importType === 'daily' && (
-                                <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center bg-gray-50">
-                                    <h4 className="font-bold text-gray-700 mb-2">日報CSVのアップロード</h4>
-                                    <p className="text-xs text-gray-500 mb-6">形式: 日付(yyyy-mm-dd), 天気, 門配数, T&T数, 体験実施数, コメント</p>
-                                    
-                                    <input type="file" ref={dailyFileRef} accept=".csv" onChange={handleDailyImport} className="hidden" />
-                                    <button 
-                                        onClick={() => dailyFileRef.current?.click()} 
-                                        disabled={isProcessing}
-                                        className="bg-white border border-gray-300 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-50 shadow-sm flex items-center justify-center mx-auto"
-                                    >
-                                        {isProcessing ? <Loader2 className="w-5 h-5 animate-spin mr-2"/> : <FileText className="w-5 h-5 mr-2 text-brand-orange"/>}
-                                        CSVファイルを選択
-                                    </button>
-                                </div>
-                            )}
-
-                            {importType === 'plan' && (
-                                <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center bg-gray-50">
-                                    <h4 className="font-bold text-gray-700 mb-2">週次計画CSVのアップロード</h4>
-                                    <p className="text-xs text-gray-500 mb-6">形式: 年度, 月(例:4月), 週(例:第1週), T&T, 門配, 体験申込, 体験実施, 入会</p>
-                                    
-                                    <input type="file" ref={planFileRef} accept=".csv" onChange={handlePlanImport} className="hidden" />
-                                    <button 
-                                        onClick={() => planFileRef.current?.click()} 
-                                        disabled={isProcessing}
-                                        className="bg-white border border-gray-300 text-gray-700 px-6 py-3 rounded-lg font-bold hover:bg-gray-50 shadow-sm flex items-center justify-center mx-auto"
-                                    >
-                                        {isProcessing ? <Loader2 className="w-5 h-5 animate-spin mr-2"/> : <TrendingUp className="w-5 h-5 mr-2 text-brand-orange"/>}
-                                        CSVファイルを選択
-                                    </button>
-                                </div>
-                            )}
-
-                            <div className="mt-6 p-4 bg-blue-50 rounded-lg text-xs text-blue-800">
-                                <p className="font-bold mb-1">注意点:</p>
-                                <ul className="list-disc list-inside space-y-1 opacity-80">
-                                    <li>文字コードは <strong>Shift_JIS</strong> で保存されたCSVを使用してください。</li>
-                                    <li>1行目はヘッダーとしてスキップされます。</li>
-                                    <li>既存のデータがある箇所（同じ日付や週）は、CSVの内容で<strong>上書き</strong>されます。</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            // 既存のロジック...
+            // 印刷用スタイル（モードに応じて用紙サイズと向きを切り替え）
             const reportStyle = `
                 @media print {
                     @page { 
@@ -1473,17 +1411,17 @@
                         margin: 5mm; 
                     }
                     body {
-                        zoom: ${reportMode === 'annual' ? '0.9' : '0.83'}; 
+                        zoom: ${reportMode === 'annual' ? '0.9' : '0.83'}; /* 横向き時は少し縮小率を緩和 */
                     }
                 }
+                /* プレビュー画面の用紙サイズ調整 */
                 .report-preview-wrapper {
                     width: ${reportMode === 'annual' ? '297mm' : '210mm'} !important;
                     min-height: ${reportMode === 'annual' ? '210mm' : '297mm'} !important;
                 }
             `;
-            
-            // ... (Dashboard Data Hooks, Plan Data Hooks などのロジックは変更なし) ...
 
+            // ダッシュボードデータの計算 (レポート用)
             const dashboardData = useMemo(() => {
                 if (!campus) return [];
                 return processDashboardData([campus], allData.enrollments, allData.statusChanges, allData.transfers, allData.dailyReports, allData.financials, allData.trialApps, Number(selectedYear));
@@ -1517,9 +1455,11 @@
                 }
             }, [activeTab, campus, selectedYear]);
 
+            // 生徒数推移を含めた計画データの計算
             const calculatedPlanData = useMemo(() => {
                 const newData = { ...planData };
                 let currentStudentCount = Number(newData.initialStudents) || 0;
+                
                 MONTHS_LIST.forEach(m => {
                     if (!newData[m]) newData[m] = {};
                     const enroll = Number(newData[m].enrollments || 0);
@@ -1627,6 +1567,7 @@
                 }), { touchTry:0, flyers:0, trialApp:0, trialParticipation:0, enrollments:0 });
             }, [planData, selectedMonth]);
             
+            // 既存の収支取込機能
             const handleCsvUpload = async (parsedData) => {
                 if (!campus) return;
                 setUploading(true);
@@ -1666,8 +1607,10 @@
 
             return (
                 <div className="flex h-screen bg-brand-slate overflow-hidden fade-in print:block print:h-auto print:overflow-visible print:bg-white">
+                    {/* 動的スタイル（印刷設定の制御） */}
                     <style>{reportStyle}</style>
 
+                    {/* レポート印刷用ビュー */}
                     <div className="print-only">
                          {reportMode === 'monthly' ? (
                             <ReportView 
@@ -1740,7 +1683,6 @@
                             <h2 className="text-xl font-bold text-gray-800 truncate">{campus.name}</h2>
                         </div>
                         <nav className="flex-1 p-4 space-y-1">
-                            {/* --- 変更: 'import' タブを追加 --- */}
                             {[{id:'daily',l:'日報入力',i:Calendar}, {id:'plan',l:'計画策定',i:FileText}, {id:'import',l:'データ取込',i:Upload}, {id:'report',l:'帳票出力',i:Printer}, {id:'finance',l:'収支取込',i:FileSpreadsheet}].map(t => {
                                 if (t.id === 'finance' && !isAdmin) return (
                                     <button key={t.id} onClick={() => setActiveTab(t.id)} className="w-full flex items-center px-4 py-3 rounded-lg text-gray-400 hover:bg-gray-50 transition-colors">
@@ -1771,7 +1713,6 @@
                             {activeTab === 'daily' && (
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in">
                                     <div className="lg:col-span-3 bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                                        {/* ... 日報カレンダーの既存ロジック ... */}
                                         <div className="flex justify-between mb-4">
                                             <h3 className="font-bold text-gray-700 flex items-center"><Calendar className="w-4 h-4 mr-2"/> {displayCalendarYear}年 {selectedMonth}</h3>
                                             <div className="flex gap-1">{MONTHS_LIST.map(m=><button key={m} onClick={()=>setSelectedMonth(m)} className={`text-xs px-2 py-1 rounded ${selectedMonth===m?'bg-brand-orange text-white':'text-gray-400 hover:bg-gray-100'}`}>{m}</button>)}</div>
@@ -1779,7 +1720,7 @@
                                         <div className="grid grid-cols-7 gap-px bg-gray-200 border border-gray-200 rounded-lg overflow-hidden">
                                             {['日','月','火','水','木','金','土'].map((d,i)=><div key={i} className="bg-gray-50 text-center py-2 text-xs font-bold text-gray-500">{d}</div>)}
                                             
-                                            {/* カレンダー生成ロジック (変更なし) */}
+                                            {/* カレンダー生成ロジック */}
                                             {(() => {
                                                 const targetMonthIdx = MONTHS_LIST.indexOf(selectedMonth);
                                                 let tYear = Number(selectedYear);
@@ -1828,7 +1769,6 @@
                             {activeTab === 'plan' && (
                                 <div className="space-y-6 animate-in fade-in">
                                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                                         {/* ... 計画策定UIの既存コード (変更なし) ... */}
                                         <div className="flex justify-between items-center mb-6">
                                             <div className="flex items-center gap-4">
                                                 <h3 className="font-bold text-gray-800 flex items-center"><TrendingUp className="w-5 h-5 mr-2 text-brand-orange"/> {selectedYear}年度 計画策定</h3>
@@ -1840,9 +1780,9 @@
                                             <button onClick={handleSavePlan} disabled={isSavingPlan} className="bg-brand-blue text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-700 flex items-center">{isSavingPlan ? <Loader2 className="animate-spin w-4 h-4 mr-2"/> : <Save className="w-4 h-4 mr-2"/>} 保存する</button>
                                         </div>
 
+                                        {/* 年間計画モード */}
                                         {planMode === 'annual' && (
                                             <div className="overflow-x-auto w-full">
-                                                {/* ... 年間計画表 ... */}
                                                 <div className="mb-8 w-full">
                                                     <h4 className="font-bold text-gray-700 mb-2 border-l-4 border-brand-orange pl-2">1. 生徒・マーケティング計画</h4>
                                                     <div className="flex items-center mb-4 bg-orange-50 p-3 rounded-lg border border-orange-100">
@@ -1939,9 +1879,9 @@
                                             </div>
                                         )}
 
+                                        {/* 月度計画モード (週次) */}
                                         {planMode === 'monthly' && (
                                             <div>
-                                                {/* ... 月度計画(週次)の既存UI ... */}
                                                 <div className="flex gap-1 mb-4 flex-wrap">
                                                     {MONTHS_LIST.map(m=><button key={m} onClick={()=>setSelectedMonth(m)} className={`text-sm px-3 py-1 rounded-full border ${selectedMonth===m?'bg-brand-orange text-white border-brand-orange':'bg-white text-gray-500 hover:bg-gray-50'}`}>{m}</button>)}
                                                 </div>
@@ -1992,7 +1932,7 @@
                                 </div>
                             )}
 
-                            {/* --- 追加: CSVインポートパネル --- */}
+                            {/* データ取込タブ */}
                             {activeTab === 'import' && <CSVImportPanel />}
 
                             {/* 帳票出力タブ */}
