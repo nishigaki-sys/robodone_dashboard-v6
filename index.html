@@ -2042,7 +2042,7 @@
         }
 
        // ==========================================
-        // 5. HQ Console Component (修正版: 生徒数グラフに在籍推移を追加)
+        // 5. HQ Console Component (修正版: 集客ファネルの門配・T&Tを積上げに変更)
         // ==========================================
         function HQConsole({ onBack, campusList, allData, selectedYear, setSelectedYear, refreshData, showNotify, isSyncing, lastUpdated, isUsingCache, isAdmin }) {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -2686,8 +2686,8 @@
                                                 <YAxis yAxisId="right" orientation="right" />
                                                 <Tooltip />
                                                 <Legend />
-                                                <Bar yAxisId="left" dataKey="flyers" name="門配数" fill="#94a3b8" />
-                                                <Bar yAxisId="left" dataKey="touchTry" name="T&T数" fill="#82ca9d" />
+                                                <Bar yAxisId="left" dataKey="flyers" name="門配数" stackId="contact" fill="#94a3b8" />
+                                                <Bar yAxisId="left" dataKey="touchTry" name="T&T数" stackId="contact" fill="#82ca9d" />
                                                 
                                                 <Bar yAxisId="right" dataKey="trialApp" name="体験申込" stackId="app" fill="#3b82f6" />
                                                 <Bar yAxisId="right" dataKey="eventApp" name="イベント申込" stackId="app" fill="#93c5fd" />
